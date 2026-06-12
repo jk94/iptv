@@ -49,6 +49,23 @@ flutter build apk      # Android
 flutter build ios      # iOS (benötigt macOS/Xcode)
 ```
 
+## Releases
+
+Ein Push eines Tags im Format `v1.1.1` startet die Release-Pipeline
+(`.github/workflows/release.yml`):
+
+1. `flutter analyze` und `flutter test`
+2. Android-Build: universelle APK, APKs pro ABI (arm64-v8a, armeabi-v7a) und App Bundle (`.aab`)
+3. iOS-Build: unsignierte `.ipa` (muss vor der Installation nachsigniert werden, z. B. mit AltStore/Sideloadly oder Xcode)
+4. GitHub-Release mit allen Paketen und automatischen Release-Notes
+
+```bash
+git tag v1.1.1
+git push origin v1.1.1
+```
+
+Der Versionsname der App wird dabei aus dem Tag übernommen (`v1.1.1` → `1.1.1`).
+
 ## Hinweise
 
 - Viele IPTV-Streams laufen über `http://` — Cleartext-Traffic (Android) und
