@@ -74,6 +74,11 @@ jobs:
     name: iOS-Build
     needs: test
     runs-on: macos-latest
+    env:
+      IOS_BUNDLE_ID: com.jk94.iptvPlayer
+      # Export-Methode überschreibbar per Repository-Variable
+      # (app-store | ad-hoc | development | enterprise). Standard: app-store.
+      IOS_EXPORT_METHOD: ${{ vars.IOS_EXPORT_METHOD || 'app-store' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -85,18 +90,125 @@ jobs:
 
       - run: flutter pub get
 
-      # Ohne Signierung gebaut: Die IPA muss vor der Installation
-      # nachsigniert werden (z. B. mit AltStore/Sideloadly oder Xcode).
-      - name: Build iOS (unsigniert)
+      # Signing nur, wenn die nötigen Secrets hinterlegt sind. Andernfalls
+      # fällt der Job auf einen unsignierten Build zurück, damit die
+      # Pipeline auch ohne Apple-Konto durchläuft.
+      - name: Signing-Verfügbarkeit prüfen
+        id: signing
+        env:
+          CERT: ${{ secrets.IOS_DIST_CERTIFICATE_BASE64 }}
+          PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -n "$CERT" ] && [ -n "$PROFILE" ] && [ -n "$TEAM_ID" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::iOS-Code-Signing aktiviert."
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::iOS-Signing-Secrets fehlen – baue unsignierte IPA."
+          fi
+
+      # Zertifikat in einen temporären Keychain importieren und das
+      # Provisioning-Profil installieren (Apples empfohlener CI-Ablauf).
+      - name: Zertifikat und Profil installieren
+        if: steps.signing.outputs.enabled == 'true'
+        env:
+          CERT_BASE64: ${{ secrets.IOS_DIST_CERTIFICATE_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.IOS_DIST_CERTIFICATE_PASSWORD }}
+          PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+          KEYCHAIN_PASSWORD: ${{ secrets.IOS_KEYCHAIN_PASSWORD }}
+        run: |
+          CERT_PATH="$RUNNER_TEMP/dist_certificate.p12"
+          PROFILE_PATH="$RUNNER_TEMP/profile.mobileprovision"
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+
+          echo -n "$CERT_BASE64" | base64 --decode -o "$CERT_PATH"
+          echo -n "$PROFILE_BASE64" | base64 --decode -o "$PROFILE_PATH"
+
+          # Temporären Keychain anlegen und entsperren.
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Zertifikat importieren und für codesign freigeben.
+          security import "$CERT_PATH" -P "$CERT_PASSWORD" -A -t cert \
+            -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: \
+            -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
+          security list-keychain -d user -s "$KEYCHAIN_PATH" login.keychain
+
+          # Profilnamen + UUID auslesen und das Profil installieren.
+          PROFILE_PLIST="$RUNNER_TEMP/profile.plist"
+          security cms -D -i "$PROFILE_PATH" > "$PROFILE_PLIST"
+          PROFILE_NAME=$(/usr/libexec/PlistBuddy -c "Print :Name" "$PROFILE_PLIST")
+          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c "Print :UUID" "$PROFILE_PLIST")
+
+          PROFILE_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+          mkdir -p "$PROFILE_DIR"
+          cp "$PROFILE_PATH" "$PROFILE_DIR/$PROFILE_UUID.mobileprovision"
+
+          echo "PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
+
+      - name: ExportOptions.plist erzeugen
+        if: steps.signing.outputs.enabled == 'true'
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>${IOS_EXPORT_METHOD}</string>
+            <key>teamID</key>
+            <string>${TEAM_ID}</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>${IOS_BUNDLE_ID}</key>
+              <string>${PROFILE_NAME}</string>
+            </dict>
+            <key>stripSwiftSymbols</key>
+            <true/>
+            <key>compileBitcode</key>
+            <false/>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Build signierte IPA
+        if: steps.signing.outputs.enabled == 'true'
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          flutter build ios --release --no-codesign --build-name="$VERSION" --build-number="$GITHUB_RUN_NUMBER"
+          flutter build ipa --release \
+            --build-name="$VERSION" --build-number="$GITHUB_RUN_NUMBER" \
+            --export-options-plist="$RUNNER_TEMP/ExportOptions.plist"
+          mkdir -p dist
+          IPA=$(find build/ios/ipa -name '*.ipa' | head -n 1)
+          cp "$IPA" "dist/iptv-player-${GITHUB_REF_NAME}-ios.ipa"
 
-      - name: IPA paketieren
+      # Fallback: unsignierte IPA, falls keine Secrets hinterlegt sind.
+      # Muss vor der Installation nachsigniert werden (AltStore/Sideloadly/Xcode).
+      - name: Build unsignierte IPA
+        if: steps.signing.outputs.enabled == 'false'
         run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          flutter build ios --release --no-codesign \
+            --build-name="$VERSION" --build-number="$GITHUB_RUN_NUMBER"
           mkdir -p dist Payload
           cp -r build/ios/iphoneos/Runner.app Payload/
           zip -qr "dist/iptv-player-${GITHUB_REF_NAME}-ios-unsigned.ipa" Payload
+
+      # Keychain immer wieder entfernen, auch wenn der Build fehlschlägt.
+      - name: Keychain aufräumen
+        if: always() && steps.signing.outputs.enabled == 'true'
+        run: |
+          security delete-keychain "$RUNNER_TEMP/app-signing.keychain-db" || true
+          rm -f "$RUNNER_TEMP/dist_certificate.p12" \
+                "$RUNNER_TEMP/profile.mobileprovision" \
+                "$RUNNER_TEMP/profile.plist" || true
 
       - uses: actions/upload-artifact@v4
         with:

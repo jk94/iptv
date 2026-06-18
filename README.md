@@ -56,7 +56,7 @@ Ein Push eines Tags im Format `v1.1.1` startet die Release-Pipeline
 
 1. `flutter analyze` und `flutter test`
 2. Android-Build: universelle APK, APKs pro ABI (arm64-v8a, armeabi-v7a) und App Bundle (`.aab`)
-3. iOS-Build: unsignierte `.ipa` (muss vor der Installation nachsigniert werden, z. B. mit AltStore/Sideloadly oder Xcode)
+3. iOS-Build: signierte `.ipa`, sobald die Apple-Signing-Secrets hinterlegt sind (siehe unten); andernfalls Fallback auf eine unsignierte `.ipa`
 4. GitHub-Release mit allen Paketen und automatischen Release-Notes
 
 ```bash
@@ -65,6 +65,25 @@ git push origin v1.1.1
 ```
 
 Der Versionsname der App wird dabei aus dem Tag übernommen (`v1.1.1` → `1.1.1`).
+
+### Apple Code Signing
+
+Für signierte iOS-Builds müssen folgende **Repository-Secrets** hinterlegt sein
+(Settings → Secrets and variables → Actions). Fehlt eines davon, baut die
+Pipeline automatisch eine unsignierte IPA.
+
+| Secret | Inhalt |
+| --- | --- |
+| `IOS_DIST_CERTIFICATE_BASE64` | Distributions-Zertifikat als `.p12`, base64-kodiert (`base64 -i cert.p12`) |
+| `IOS_DIST_CERTIFICATE_PASSWORD` | Passwort des `.p12`-Exports |
+| `IOS_PROVISIONING_PROFILE_BASE64` | Provisioning-Profil (`.mobileprovision`), base64-kodiert |
+| `IOS_KEYCHAIN_PASSWORD` | beliebiges Passwort für den temporären CI-Keychain |
+| `APPLE_TEAM_ID` | Apple Developer Team ID (10-stellig) |
+
+Optional steuert die **Repository-Variable** `IOS_EXPORT_METHOD` die
+Export-Methode (`app-store`, `ad-hoc`, `development` oder `enterprise`);
+Standard ist `app-store`. Das Provisioning-Profil muss zur Bundle-ID
+`com.jk94.iptvPlayer` und zur gewählten Methode passen.
 
 ## Hinweise
 
