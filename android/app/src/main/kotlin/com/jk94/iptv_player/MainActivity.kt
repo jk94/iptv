@@ -1,5 +1,7 @@
 package com.jk94.iptv_player
 
-import io.flutter.embedding.android.FlutterActivity
+import cl.puntito.simple_pip_mode.PipCallbackHelperActivityWrapper
 
-class MainActivity : FlutterActivity()
+// Extends the simple_pip_mode wrapper so Picture-in-Picture callbacks
+// (onPipEntered/onPipExited) are forwarded to Flutter.
+class MainActivity : PipCallbackHelperActivityWrapper()

@@ -14,6 +14,8 @@ class AppState extends ChangeNotifier {
   static const _recentsKey = 'recents';
   static const _maxRecents = 10;
 
+  static String _channelsKey(String playlistId) => 'channels_$playlistId';
+
   final PlaylistLoader _loader = PlaylistLoader();
   final Map<String, List<Channel>> _channelCache = {};
 
@@ -72,22 +74,87 @@ class AppState extends ChangeNotifier {
     await _savePlaylists();
   }
 
-  Future<void> removePlaylist(String id) async {
-    _playlists = _playlists.where((p) => p.id != id).toList();
-    _channelCache.remove(id);
+  /// Updates an existing playlist. If the source (URL/credentials) changed,
+  /// the cached channels are invalidated so they get reloaded.
+  Future<void> updatePlaylist(Playlist updated) async {
+    final index = _playlists.indexWhere((p) => p.id == updated.id);
+    if (index < 0) return;
+    final previous = _playlists[index];
+    final next = [..._playlists];
+    next[index] = updated;
+    _playlists = next;
+
+    if (!previous.hasSameSource(updated)) {
+      await _invalidateChannelCache(updated.id);
+    }
     notifyListeners();
     await _savePlaylists();
   }
 
-  /// Loads (and caches) the channels of a playlist.
+  Future<void> removePlaylist(String id) async {
+    _playlists = _playlists.where((p) => p.id != id).toList();
+    await _invalidateChannelCache(id);
+    notifyListeners();
+    await _savePlaylists();
+  }
+
+  /// Loads the channels of a playlist.
+  ///
+  /// Order of lookup (unless [refresh] is set): in-memory cache, then the
+  /// persistent cache from a previous session, then the network. A network
+  /// load always updates both caches so a restart can reuse them.
   Future<List<Channel>> channelsFor(Playlist playlist,
       {bool refresh = false}) async {
-    if (!refresh && _channelCache.containsKey(playlist.id)) {
-      return _channelCache[playlist.id]!;
+    if (!refresh) {
+      final memory = _channelCache[playlist.id];
+      if (memory != null) return memory;
+
+      final cached = await _loadCachedChannels(playlist.id);
+      if (cached != null && cached.isNotEmpty) {
+        _channelCache[playlist.id] = cached;
+        return cached;
+      }
     }
+
     final channels = await _loader.load(playlist);
     _channelCache[playlist.id] = channels;
+    await _saveChannels(playlist.id, channels);
     return channels;
+  }
+
+  /// Forces a network reload of the channels and refreshes the cache.
+  /// Returns the number of channels loaded.
+  Future<int> forceReload(Playlist playlist) async {
+    final channels = await channelsFor(playlist, refresh: true);
+    notifyListeners();
+    return channels.length;
+  }
+
+  Future<List<Channel>?> _loadCachedChannels(String playlistId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_channelsKey(playlistId));
+    if (raw == null) return null;
+    try {
+      return (jsonDecode(raw) as List)
+          .map((e) => Channel.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _saveChannels(String playlistId, List<Channel> channels) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _channelsKey(playlistId),
+      jsonEncode(channels.map((c) => c.toJson()).toList()),
+    );
+  }
+
+  Future<void> _invalidateChannelCache(String playlistId) async {
+    _channelCache.remove(playlistId);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_channelsKey(playlistId));
   }
 
   /// Category names of a loaded playlist, in order of first appearance.

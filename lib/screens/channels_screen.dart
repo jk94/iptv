@@ -60,11 +60,17 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
                       style: const TextStyle(fontWeight: FontWeight.w600),
                     ),
                     trailing: const Icon(Icons.play_circle_outline_rounded),
-                    onTap: () => PlayerScreen.open(
-                      context,
-                      channel: channel,
-                      playlistName: widget.playlistName,
-                    ),
+                    onTap: () {
+                      // Navigate within the full category list so prev/next
+                      // is not limited by the current search filter.
+                      final startIndex = widget.channels.indexOf(channel);
+                      PlayerScreen.open(
+                        context,
+                        channels: widget.channels,
+                        initialIndex: startIndex >= 0 ? startIndex : 0,
+                        playlistName: widget.playlistName,
+                      );
+                    },
                   ),
                 );
               },

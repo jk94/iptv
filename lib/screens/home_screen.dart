@@ -82,7 +82,8 @@ class _RecentsRow extends StatelessWidget {
               child: InkWell(
                 onTap: () => PlayerScreen.open(
                   context,
-                  channel: entry.channel,
+                  channels: [entry.channel],
+                  initialIndex: 0,
                   playlistName: entry.playlistName,
                 ),
                 child: Padding(
@@ -110,13 +111,39 @@ class _RecentsRow extends StatelessWidget {
   }
 }
 
-class _PlaylistCard extends StatelessWidget {
+class _PlaylistCard extends StatefulWidget {
   final Playlist playlist;
   const _PlaylistCard({required this.playlist});
 
   @override
+  State<_PlaylistCard> createState() => _PlaylistCardState();
+}
+
+class _PlaylistCardState extends State<_PlaylistCard> {
+  bool _reloading = false;
+
+  Future<void> _reload() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final appState = context.read<AppState>();
+    setState(() => _reloading = true);
+    try {
+      final count = await appState.forceReload(widget.playlist);
+      messenger.showSnackBar(
+        SnackBar(content: Text('$count Streams neu geladen.')),
+      );
+    } catch (_) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Neu laden fehlgeschlagen.')),
+      );
+    } finally {
+      if (mounted) setState(() => _reloading = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final playlist = widget.playlist;
     return Card(
       clipBehavior: Clip.antiAlias,
       child: ListTile(
@@ -138,7 +165,23 @@ class _PlaylistCard extends StatelessWidget {
         subtitle: Text(
           playlist.type == PlaylistType.m3u ? 'M3U-Playlist' : 'Xtream Codes',
         ),
-        trailing: const Icon(Icons.chevron_right_rounded),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              tooltip: 'Channels neu laden',
+              icon: _reloading
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.refresh_rounded),
+              onPressed: _reloading ? null : _reload,
+            ),
+            const Icon(Icons.chevron_right_rounded),
+          ],
+        ),
         onTap: () => Navigator.of(context).push(
           MaterialPageRoute(
             builder: (_) => CategoriesScreen(playlist: playlist),

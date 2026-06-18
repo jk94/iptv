@@ -9,8 +9,15 @@ Eine moderne IPTV-Player-App für **Android und iOS**, gebaut mit Flutter (Mater
   - **Xtream Codes** per Server, Benutzername und Passwort
 - **Navigation:** Playlist → Kategorie → Stream → Player
 - **Startseite** mit „Zuletzt gesehen" und Playlist-Übersicht
-- **Einstellungen** zum Verwalten der Playlists und Löschen des Verlaufs
+- **Einstellungen** zum Verwalten, **Bearbeiten** und Löschen der Playlists
+- **Channel-Cache:** Geladene Streams werden lokal gespeichert und beim
+  Neustart aus dem Cache geladen; ein Button an jeder Playlist erzwingt das
+  Neuladen (Startseite und Einstellungen)
 - **Video-Player** im Vollbild (Querformat) mit automatisch ausblendenden Bedienelementen, LIVE-Badge und Bildschirm-Wachhalten (Wakelock)
+- **Sender wechseln** direkt im Player über Vor-/Zurück-Buttons (nächster Stream
+  derselben Kategorie)
+- **Picture-in-Picture (Android):** Die Wiedergabe läuft in einem schwebenden
+  Fenster weiter, wenn die App in den Hintergrund verschoben wird
 - Suche in Kategorien und Streams
 
 ## Projektstruktur
@@ -72,3 +79,8 @@ Der Versionsname der App wird dabei aus dem Tag übernommen (`v1.1.1` → `1.1.1
   `NSAllowsArbitraryLoads` (iOS) sind dafür bereits konfiguriert.
 - Die App liefert keine Inhalte mit; es werden ausschließlich vom Nutzer
   hinterlegte Playlists abgespielt.
+- **Picture-in-Picture** ist über das Plugin `simple_pip_mode` umgesetzt und
+  steht nur unter **Android** zur Verfügung (automatisches Wechseln in den
+  PiP-Modus ab Android 12, manueller Button ab Android 8). Unter iOS bietet
+  `video_player` kein PiP; dort bleibt der Vor-/Zurück- und Caching-Funktionsumfang
+  unverändert verfügbar.

@@ -39,7 +39,7 @@ class SettingsScreen extends StatelessWidget {
             ],
           const SizedBox(height: 8),
           FilledButton.icon(
-            onPressed: () => _showAddPlaylistSheet(context),
+            onPressed: () => showPlaylistSheet(context),
             icon: const Icon(Icons.add_rounded),
             label: const Text('Playlist hinzufügen'),
           ),
@@ -80,14 +80,17 @@ class SettingsScreen extends StatelessWidget {
     );
   }
 
-  void _showAddPlaylistSheet(BuildContext context) {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (_) => const _AddPlaylistSheet(),
-    );
-  }
+}
+
+/// Opens the bottom sheet to add a new playlist or, when [existing] is given,
+/// to edit it.
+void showPlaylistSheet(BuildContext context, {Playlist? existing}) {
+  showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    builder: (_) => _PlaylistSheet(existing: existing),
+  );
 }
 
 class _PlaylistTile extends StatelessWidget {
@@ -113,13 +116,64 @@ class _PlaylistTile extends StatelessWidget {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
-        trailing: IconButton(
-          tooltip: 'Entfernen',
-          icon: const Icon(Icons.delete_outline_rounded),
-          onPressed: () => _confirmDelete(context),
+        trailing: PopupMenuButton<String>(
+          onSelected: (value) {
+            switch (value) {
+              case 'edit':
+                showPlaylistSheet(context, existing: playlist);
+              case 'reload':
+                _reload(context);
+              case 'delete':
+                _confirmDelete(context);
+            }
+          },
+          itemBuilder: (_) => const [
+            PopupMenuItem(
+              value: 'edit',
+              child: ListTile(
+                leading: Icon(Icons.edit_outlined),
+                title: Text('Bearbeiten'),
+                contentPadding: EdgeInsets.zero,
+              ),
+            ),
+            PopupMenuItem(
+              value: 'reload',
+              child: ListTile(
+                leading: Icon(Icons.refresh_rounded),
+                title: Text('Channels neu laden'),
+                contentPadding: EdgeInsets.zero,
+              ),
+            ),
+            PopupMenuItem(
+              value: 'delete',
+              child: ListTile(
+                leading: Icon(Icons.delete_outline_rounded),
+                title: Text('Entfernen'),
+                contentPadding: EdgeInsets.zero,
+              ),
+            ),
+          ],
         ),
       ),
     );
+  }
+
+  Future<void> _reload(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final appState = context.read<AppState>();
+    messenger.showSnackBar(
+      SnackBar(content: Text('„${playlist.name}" wird neu geladen…')),
+    );
+    try {
+      final count = await appState.forceReload(playlist);
+      messenger.showSnackBar(
+        SnackBar(content: Text('$count Streams neu geladen.')),
+      );
+    } catch (_) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Neu laden fehlgeschlagen.')),
+      );
+    }
   }
 
   Future<void> _confirmDelete(BuildContext context) async {
@@ -146,23 +200,39 @@ class _PlaylistTile extends StatelessWidget {
   }
 }
 
-/// Bottom sheet with tabs to add either an M3U URL or an Xtream account.
-class _AddPlaylistSheet extends StatefulWidget {
-  const _AddPlaylistSheet();
+/// Bottom sheet to add a new playlist or edit an existing one
+/// (M3U URL or Xtream account).
+class _PlaylistSheet extends StatefulWidget {
+  final Playlist? existing;
+  const _PlaylistSheet({this.existing});
 
   @override
-  State<_AddPlaylistSheet> createState() => _AddPlaylistSheetState();
+  State<_PlaylistSheet> createState() => _PlaylistSheetState();
 }
 
-class _AddPlaylistSheetState extends State<_AddPlaylistSheet> {
+class _PlaylistSheetState extends State<_PlaylistSheet> {
   final _formKey = GlobalKey<FormState>();
-  PlaylistType _type = PlaylistType.m3u;
+  late PlaylistType _type;
 
-  final _name = TextEditingController();
-  final _url = TextEditingController();
-  final _host = TextEditingController();
-  final _username = TextEditingController();
-  final _password = TextEditingController();
+  late final TextEditingController _name;
+  late final TextEditingController _url;
+  late final TextEditingController _host;
+  late final TextEditingController _username;
+  late final TextEditingController _password;
+
+  bool get _isEditing => widget.existing != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final existing = widget.existing;
+    _type = existing?.type ?? PlaylistType.m3u;
+    _name = TextEditingController(text: existing?.name ?? '');
+    _url = TextEditingController(text: existing?.url ?? '');
+    _host = TextEditingController(text: existing?.host ?? '');
+    _username = TextEditingController(text: existing?.username ?? '');
+    _password = TextEditingController(text: existing?.password ?? '');
+  }
 
   @override
   void dispose() {
@@ -177,7 +247,19 @@ class _AddPlaylistSheetState extends State<_AddPlaylistSheet> {
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     final state = context.read<AppState>();
-    if (_type == PlaylistType.m3u) {
+    final existing = widget.existing;
+
+    if (existing != null) {
+      await state.updatePlaylist(existing.copyWith(
+        name: _name.text.trim(),
+        type: _type,
+        url: _type == PlaylistType.m3u ? _url.text.trim() : null,
+        host: _type == PlaylistType.xtream ? _host.text.trim() : null,
+        username:
+            _type == PlaylistType.xtream ? _username.text.trim() : null,
+        password: _type == PlaylistType.xtream ? _password.text : null,
+      ));
+    } else if (_type == PlaylistType.m3u) {
       await state.addM3uPlaylist(
         name: _name.text.trim(),
         url: _url.text.trim(),
@@ -221,7 +303,7 @@ class _AddPlaylistSheetState extends State<_AddPlaylistSheet> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              'Playlist hinzufügen',
+              _isEditing ? 'Playlist bearbeiten' : 'Playlist hinzufügen',
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 16),
