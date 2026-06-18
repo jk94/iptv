@@ -27,6 +27,36 @@ class Playlist {
     this.password,
   });
 
+  /// Returns a copy with the given fields replaced. Source fields
+  /// (url/host/username/password) are overwritten as passed so that editing
+  /// can clear values too.
+  Playlist copyWith({
+    String? name,
+    PlaylistType? type,
+    String? url,
+    String? host,
+    String? username,
+    String? password,
+  }) =>
+      Playlist(
+        id: id,
+        name: name ?? this.name,
+        type: type ?? this.type,
+        url: url ?? this.url,
+        host: host ?? this.host,
+        username: username ?? this.username,
+        password: password ?? this.password,
+      );
+
+  /// Whether [other] points at the same source (used to decide if the
+  /// channel cache must be invalidated after an edit).
+  bool hasSameSource(Playlist other) =>
+      type == other.type &&
+      url == other.url &&
+      host == other.host &&
+      username == other.username &&
+      password == other.password;
+
   Map<String, dynamic> toJson() => {
         'id': id,
         'name': name,
